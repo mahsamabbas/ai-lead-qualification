@@ -72,6 +72,7 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [serviceReady, setServiceReady] = useState<boolean | null>(null);
   const conversationEnd = useRef<HTMLDivElement>(null);
+  const chatGenerationRef = useRef(0);
 
   const refreshLeads = useCallback(async () => {
     try {
@@ -103,10 +104,12 @@ export default function Home() {
     setError(null);
     setDraft("");
     setMessages((current) => [...current, { role: "user", content: message }]);
+    const generation = chatGenerationRef.current;
     setPending(true);
 
     try {
       const result = await sendChat(message, history, previousSummary);
+      if (generation !== chatGenerationRef.current) return;
       setMessages((current) => [
         ...current,
         { role: "assistant", content: result.assistant_message },
@@ -114,9 +117,12 @@ export default function Home() {
       setSummary(result.summary);
       await refreshLeads();
     } catch (requestError) {
+      if (generation !== chatGenerationRef.current) return;
       setError(errorMessage(requestError));
     } finally {
-      setPending(false);
+      if (generation === chatGenerationRef.current) {
+        setPending(false);
+      }
     }
   }
 
@@ -126,11 +132,13 @@ export default function Home() {
   }
 
   function startNewLead() {
+    chatGenerationRef.current += 1;
     setMessages([]);
     setSummary(null);
     setSelectedLead(null);
     setError(null);
     setDraft("");
+    setPending(false);
   }
 
   async function openLead(id: number) {

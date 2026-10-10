@@ -89,6 +89,49 @@ describe("lead qualification page", () => {
     ).toBeInTheDocument();
   });
 
+  it("ignores in-flight chat after New lead clears the conversation", async () => {
+    let resolveSendChat!: (value: Awaited<ReturnType<typeof api.sendChat>>) => void;
+    api.sendChat.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSendChat = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Ready buyer" }));
+    expect(screen.getByLabelText("Assistant is responding")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "New lead" }));
+
+    expect(
+      screen.getByText(/tell me about the store you want to build/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("unknown")).toHaveLength(4);
+    expect(
+      screen.queryByLabelText("Assistant is responding"),
+    ).not.toBeInTheDocument();
+
+    resolveSendChat({
+      assistant_message: "You sound ready. Let's book a product demo.",
+      summary: {
+        needs: completedLead.needs,
+        budget: completedLead.budget,
+        timeline: completedLead.timeline,
+        next_step: completedLead.next_step,
+      },
+      saved: true,
+      lead_id: completedLead.id,
+    });
+
+    await waitFor(() => expect(api.sendChat).toHaveBeenCalled());
+    expect(
+      screen.queryByText("You sound ready. Let's book a product demo."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(completedLead.budget)).not.toBeInTheDocument();
+    expect(screen.getAllByText("unknown")).toHaveLength(4);
+  });
+
   it("shows backend errors and loads a past lead as read-only detail", async () => {
     api.fetchLeads.mockResolvedValue([completedLead]);
     api.fetchLead.mockResolvedValue(completedLead);
