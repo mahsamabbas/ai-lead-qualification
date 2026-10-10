@@ -1,0 +1,119 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const api = vi.hoisted(() => ({
+  fetchLead: vi.fn(),
+  fetchLeads: vi.fn(),
+  fetchStatus: vi.fn(),
+  sendChat: vi.fn(),
+}));
+
+vi.mock("@/lib/api", () => api);
+
+import Home from "./page";
+
+const completedLead = {
+  id: 7,
+  created_at: "2026-10-10T12:00:00Z",
+  needs: "BrightMart clothing store",
+  budget: "$900-$1200",
+  timeline: "Next month",
+  next_step: "Book a product demo",
+};
+
+describe("lead qualification page", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.fetchStatus.mockResolvedValue({ ready: true, model: "gemini-test" });
+    api.fetchLeads.mockResolvedValue([]);
+  });
+
+  it("shows the welcome, exact starter choices, and unknown summary", async () => {
+    render(<Home />);
+
+    expect(
+      screen.getByText(/tell me about the store you want to build/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Busy shop owner" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Just browsing" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Ready buyer" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("unknown")).toHaveLength(4);
+    await waitFor(() => expect(api.fetchLeads).toHaveBeenCalled());
+  });
+
+  it("sends a starter message, updates summary, and keeps leads after reset", async () => {
+    api.sendChat.mockResolvedValue({
+      assistant_message: "You sound ready. Let's book a product demo.",
+      summary: {
+        needs: completedLead.needs,
+        budget: completedLead.budget,
+        timeline: completedLead.timeline,
+        next_step: completedLead.next_step,
+      },
+      saved: true,
+      lead_id: completedLead.id,
+    });
+    api.fetchLeads
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([completedLead]);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Ready buyer" }));
+
+    expect(api.sendChat).toHaveBeenCalledWith(
+      "I need a BrightMart clothing store, budget $900-$1200, launch next month.",
+      [],
+      null,
+    );
+    expect(await screen.findByText(completedLead.budget)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", {
+        name: /BrightMart clothing store/i,
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "New lead" }));
+
+    expect(screen.queryByText(completedLead.budget)).not.toBeInTheDocument();
+    expect(screen.getAllByText("unknown")).toHaveLength(4);
+    expect(
+      screen.getByRole("button", { name: /BrightMart clothing store/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows backend errors and loads a past lead as read-only detail", async () => {
+    api.fetchLeads.mockResolvedValue([completedLead]);
+    api.fetchLead.mockResolvedValue(completedLead);
+    api.sendChat.mockRejectedValue(new Error("Answer service unavailable."));
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const leadButton = await screen.findByRole("button", {
+      name: /BrightMart clothing store/i,
+    });
+    await user.click(leadButton);
+    expect(api.fetchLead).toHaveBeenCalledWith(7);
+    expect(
+      await screen.findByRole("dialog", { name: "Lead details" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close details" }));
+    await user.type(
+      screen.getByLabelText("Message"),
+      "I need a store next week.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByRole("alert"),
+    ).toHaveTextContent("Answer service unavailable.");
+  });
+});
