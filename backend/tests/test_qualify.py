@@ -4,6 +4,7 @@ import pytest
 
 from app.db import init_db, list_leads
 from app.models import ChatMessage, LeadSummary
+from app.gemini_clients import ModelJsonError
 from app.qualify import (
     BadModelResponseError,
     BlankMessageError,
@@ -131,6 +132,18 @@ def test_bad_field_type(db_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     with pytest.raises(BadModelResponseError):
         qualify_turn("hello", [], None, db_path, json_fn=fake_json)
+
+
+def test_non_json_model_response_is_bad_model_response(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+
+    def non_json_json(message, history, api_key):
+        raise ModelJsonError("Model returned non-JSON")
+
+    with pytest.raises(BadModelResponseError, match="non-JSON"):
+        qualify_turn("hello", [], None, db_path, json_fn=non_json_json)
 
 
 def test_transport_failure_is_service_unavailable(

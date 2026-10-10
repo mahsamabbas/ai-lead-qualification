@@ -4,7 +4,7 @@ from typing import Any
 
 from app.config import MAX_HISTORY
 from app.db import init_db, insert_lead
-from app.gemini_clients import generate_qualification_json, get_api_key
+from app.gemini_clients import ModelJsonError, generate_qualification_json, get_api_key
 from app.models import ChatMessage, ChatResponse, LeadSummary
 from app.next_step import apply_next_step, is_complete
 
@@ -75,6 +75,8 @@ def qualify_turn(
         raw = call_json(message.strip(), _trim_history(history), api_key)
     except BadModelResponseError:
         raise
+    except ModelJsonError as exc:
+        raise BadModelResponseError("Model returned non-JSON.") from exc
     except Exception as exc:  # noqa: BLE001
         raise ServiceUnavailableError("Answer service unavailable.") from exc
 

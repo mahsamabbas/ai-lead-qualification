@@ -10,6 +10,10 @@ from app.models import ChatMessage
 logger = logging.getLogger(__name__)
 
 
+class ModelJsonError(ValueError):
+    """Gemini returned a successful response that was not valid JSON."""
+
+
 def get_api_key() -> str | None:
     key = os.getenv("GOOGLE_API_KEY", "").strip()
     return key or None
@@ -60,4 +64,4 @@ def generate_qualification_json(
         return json.loads(_strip_fences(raw))
     except json.JSONDecodeError as exc:
         logger.warning("Gemini returned non-JSON: %s", raw[:200])
-        raise ValueError("Model returned non-JSON") from exc
+        raise ModelJsonError("Model returned non-JSON") from exc
