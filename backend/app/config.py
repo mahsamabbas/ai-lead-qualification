@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 MAX_HISTORY = 10
-DEFAULT_CHAT_MODEL = "gemini-3.6-flash"
+DEFAULT_CHAT_MODEL = "gemini-3.8-flash"
 
 NEXT_STEP_DEMO = "Book a product demo"
 NEXT_STEP_RESOURCES = "Send free resources"

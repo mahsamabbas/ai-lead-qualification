@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = Field(default_factory=list)
     previous_summary: LeadSummary | None = None
+    lead_id: int | None = None
 
 
 class ChatResponse(BaseModel):

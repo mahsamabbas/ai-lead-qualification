@@ -62,6 +62,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 body.history,
                 body.previous_summary,
                 app.state.db_path,
+                active_lead_id=body.lead_id,
             )
         except BlankMessageError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

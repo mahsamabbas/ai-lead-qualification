@@ -2,6 +2,9 @@ const API_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ??
   "http://localhost:8000";
 
+/** Browser-side ceiling so typing never spins forever if the API hangs. */
+export const CHAT_TIMEOUT_MS = 45_000;
+
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -55,11 +58,30 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = 15_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The assistant took too long. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchStatus(): Promise<{
   ready: boolean;
   model: string;
 }> {
-  const response = await fetch(`${API_URL}/status`);
+  const response = await fetchWithTimeout(`${API_URL}/status`);
   return readJson(response);
 }
 
@@ -67,22 +89,32 @@ export async function sendChat(
   message: string,
   history: ChatMessage[],
   previous_summary: LeadSummary | null,
+  lead_id: number | null = null,
 ): Promise<ChatResult> {
-  const response = await fetch(`${API_URL}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, previous_summary }),
-  });
+  const response = await fetchWithTimeout(
+    `${API_URL}/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        history,
+        previous_summary,
+        lead_id,
+      }),
+    },
+    CHAT_TIMEOUT_MS,
+  );
   return readJson(response);
 }
 
 export async function fetchLeads(): Promise<LeadRecord[]> {
-  const response = await fetch(`${API_URL}/leads`);
+  const response = await fetchWithTimeout(`${API_URL}/leads`);
   const data = await readJson<{ leads: LeadRecord[] }>(response);
   return data.leads;
 }
 
 export async function fetchLead(id: number): Promise<LeadRecord> {
-  const response = await fetch(`${API_URL}/leads/${id}`);
+  const response = await fetchWithTimeout(`${API_URL}/leads/${id}`);
   return readJson(response);
 }

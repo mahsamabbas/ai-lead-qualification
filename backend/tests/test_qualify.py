@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.db import init_db, list_leads
+from app.db import get_lead, init_db, insert_lead, list_leads
 from app.models import ChatMessage, LeadSummary
 from app.gemini_clients import ModelJsonError
 from app.qualify import (
@@ -66,7 +66,7 @@ def test_incomplete_does_not_save(db_path: Path, monkeypatch: pytest.MonkeyPatch
     assert list_leads(db_path) == []
 
 
-def test_no_duplicate_save_when_already_complete(
+def test_no_duplicate_insert_without_lead_id_when_already_complete(
     db_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
@@ -94,6 +94,48 @@ def test_no_duplicate_save_when_already_complete(
     )
     assert result.saved is False
     assert list_leads(db_path) == []
+
+
+def test_edit_updates_existing_lead(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    lead_id = insert_lead(
+        db_path,
+        LeadSummary(
+            needs="Online store",
+            budget="$900",
+            timeline="Next week",
+            next_step="Book a product demo",
+        ),
+    )
+    previous = LeadSummary(
+        needs="Online store",
+        budget="$900",
+        timeline="Next week",
+        next_step="Book a product demo",
+    )
+
+    def fake_json(message, history, api_key):
+        return {
+            "assistant_message": "Updated — budget is now $500.",
+            "needs": "Online store",
+            "budget": "$500",
+            "timeline": "Next week",
+        }
+
+    result = qualify_turn(
+        "change budget to 500$",
+        [],
+        previous,
+        db_path,
+        active_lead_id=lead_id,
+        json_fn=fake_json,
+    )
+    assert result.saved is True
+    assert result.lead_id == lead_id
+    assert len(list_leads(db_path)) == 1
+    assert get_lead(db_path, lead_id).budget == "$500"
 
 
 def test_missing_key(db_path: Path, monkeypatch: pytest.MonkeyPatch):

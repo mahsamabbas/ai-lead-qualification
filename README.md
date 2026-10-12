@@ -10,6 +10,13 @@ A BrightMart demo that guides prospects through lead qualification, turns each c
 
 ## Run with Docker
 
+App 2 uses **different host ports** from App 1 so both can run side by side:
+
+| Service | App 2 (this repo) | App 1 |
+| --- | --- | --- |
+| Frontend | http://localhost:3001 | http://localhost:3000 |
+| API | http://localhost:8001 | http://localhost:8000 |
+
 Create the backend environment file and add a Google AI Studio API key:
 
 ```bash
@@ -18,9 +25,9 @@ cp backend/.env.example backend/.env
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The API runs at [http://localhost:8000](http://localhost:8000), and completed leads persist in the `leads_data` Docker volume.
+Open [http://localhost:3001](http://localhost:3001). The API is at [http://localhost:8001](http://localhost:8001). Completed leads persist in the `leads_data` Docker volume.
 
-To use a different frontend port, copy `.env.example` to `.env` and change `FRONTEND_PORT`.
+Override ports via root `.env` (`FRONTEND_PORT`, `BACKEND_PORT`, `NEXT_PUBLIC_API_URL`) if needed. Rebuild after changing `NEXT_PUBLIC_API_URL` / `BACKEND_PORT`.
 
 ## Run locally
 

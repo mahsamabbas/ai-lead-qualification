@@ -38,6 +38,7 @@ describe("API client", () => {
       "Ready to launch",
       [{ role: "assistant", content: "Tell me about your project." }],
       summary,
+      7,
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -50,9 +51,34 @@ describe("API client", () => {
             { role: "assistant", content: "Tell me about your project." },
           ],
           previous_summary: summary,
+          lead_id: 7,
         }),
+        signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it("times out hung chat requests with a clear message", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      ),
+    );
+
+    const pending = sendChat("hello", [], null);
+    const expectation = expect(pending).rejects.toThrow(
+      /took too long/i,
+    );
+    await vi.advanceTimersByTimeAsync(45_000);
+    await expectation;
+    vi.useRealTimers();
   });
 
   it("surfaces the backend error detail", async () => {
@@ -91,6 +117,7 @@ describe("API client", () => {
     await expect(fetchLead(7)).resolves.toEqual(lead);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "http://localhost:8000/leads/7",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 });

@@ -72,6 +72,7 @@ describe("lead qualification page", () => {
       "I need a BrightMart clothing store, budget $900-$1200, launch next month.",
       [],
       null,
+      null,
     );
     expect(await screen.findByText(completedLead.budget)).toBeInTheDocument();
     expect(
@@ -79,8 +80,10 @@ describe("lead qualification page", () => {
         name: /BrightMart clothing store/i,
       }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/lead qualified/i);
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "New lead" }));
+    await user.click(screen.getAllByRole("button", { name: "New lead" })[0]);
 
     expect(screen.queryByText(completedLead.budget)).not.toBeInTheDocument();
     expect(screen.getAllByText("unknown")).toHaveLength(4);
@@ -102,7 +105,7 @@ describe("lead qualification page", () => {
     await user.click(screen.getByRole("button", { name: "Ready buyer" }));
     expect(screen.getByLabelText("Assistant is responding")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "New lead" }));
+    await user.click(screen.getAllByRole("button", { name: "New lead" })[0]);
 
     expect(
       screen.getByText(/tell me about the store you want to build/i),
@@ -130,6 +133,69 @@ describe("lead qualification page", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText(completedLead.budget)).not.toBeInTheDocument();
     expect(screen.getAllByText("unknown")).toHaveLength(4);
+  });
+
+  it("soft-completes chat and unlocks editing on request", async () => {
+    api.sendChat.mockResolvedValue({
+      assistant_message: "You sound ready. Let's book a product demo.",
+      summary: {
+        needs: completedLead.needs,
+        budget: completedLead.budget,
+        timeline: completedLead.timeline,
+        next_step: completedLead.next_step,
+      },
+      saved: true,
+      lead_id: completedLead.id,
+    });
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Ready buyer" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /book a product demo/i,
+    );
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit answers" }));
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/update needs, budget, or timeline/i),
+    ).toBeInTheDocument();
+  });
+
+  it("filters past leads from the search box", async () => {
+    api.fetchLeads.mockResolvedValue([
+      completedLead,
+      {
+        id: 8,
+        created_at: "2026-10-10T13:00:00Z",
+        needs: "Online bakery shop",
+        budget: "$500",
+        timeline: "Next week",
+        next_step: "Book a product demo",
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(
+      await screen.findByRole("button", { name: /BrightMart clothing store/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Online bakery shop/i }),
+    ).toBeInTheDocument();
+
+    await user.type(
+      screen.getByLabelText("Search past leads"),
+      "bakery",
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /BrightMart clothing store/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Online bakery shop/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows backend errors and loads a past lead as read-only detail", async () => {

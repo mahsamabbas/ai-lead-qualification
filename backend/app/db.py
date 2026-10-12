@@ -52,6 +52,29 @@ def insert_lead(path: Path, summary: LeadSummary) -> int:
         return int(cur.lastrowid)
 
 
+def update_lead(path: Path, lead_id: int, summary: LeadSummary) -> bool:
+    """Update an existing completed lead. Returns False if the row is missing."""
+    if not is_complete(summary):
+        raise ValueError("Refusing to save incomplete lead.")
+    with _connect(path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE leads
+            SET needs = ?, budget = ?, timeline = ?, next_step = ?
+            WHERE id = ?
+            """,
+            (
+                summary.needs,
+                summary.budget,
+                summary.timeline,
+                summary.next_step,
+                lead_id,
+            ),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def list_leads(path: Path) -> list[LeadRecord]:
     with _connect(path) as conn:
         rows = conn.execute(

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import MAX_HISTORY
-from app.db import init_db, insert_lead
+from app.db import init_db, insert_lead, update_lead
 from app.gemini_clients import ModelJsonError, generate_qualification_json, get_api_key
 from app.models import ChatMessage, ChatResponse, LeadSummary
 from app.next_step import apply_next_step, is_complete
@@ -61,6 +61,7 @@ def qualify_turn(
     previous_summary: LeadSummary | None,
     db_path: Path,
     *,
+    active_lead_id: int | None = None,
     json_fn: JsonFn | None = None,
 ) -> ChatResponse:
     if not message or not message.strip():
@@ -88,16 +89,24 @@ def qualify_turn(
         raise BadModelResponseError("Invalid model response.") from exc
 
     saved = False
-    lead_id: int | None = None
+    lead_id: int | None = active_lead_id
     was_complete = bool(previous_summary and is_complete(previous_summary))
-    if is_complete(summary) and not was_complete:
+
+    if is_complete(summary):
         try:
             init_db(db_path)
-            lead_id = insert_lead(db_path, summary)
-            saved = True
-        except Exception:  # noqa: BLE001
+            if active_lead_id is not None and was_complete:
+                if update_lead(db_path, active_lead_id, summary):
+                    saved = True
+                    lead_id = active_lead_id
+                else:
+                    lead_id = insert_lead(db_path, summary)
+                    saved = True
+            elif not was_complete:
+                lead_id = insert_lead(db_path, summary)
+                saved = True
+        except Exception:  # noqa: BLE001 — chat still succeeds
             saved = False
-            lead_id = None
 
     return ChatResponse(
         assistant_message=assistant_message,

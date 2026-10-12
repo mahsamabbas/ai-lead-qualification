@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.db import get_lead, init_db, insert_lead, list_leads
+from app.db import get_lead, init_db, insert_lead, list_leads, update_lead
 from app.models import LeadSummary
 
 
@@ -59,3 +59,39 @@ def test_reject_incomplete(db_path: Path):
             db_path,
             LeadSummary(needs="x", budget=None, timeline="y", next_step=None),
         )
+
+
+def test_update_lead_budget(db_path: Path):
+    lead_id = insert_lead(
+        db_path,
+        LeadSummary(
+            needs="Online store",
+            budget="$900",
+            timeline="Next week",
+            next_step="Book a product demo",
+        ),
+    )
+    assert update_lead(
+        db_path,
+        lead_id,
+        LeadSummary(
+            needs="Online store",
+            budget="$500",
+            timeline="Next week",
+            next_step="Book a product demo",
+        ),
+    )
+    row = get_lead(db_path, lead_id)
+    assert row is not None
+    assert row.budget == "$500"
+    assert len(list_leads(db_path)) == 1
+    assert update_lead(
+        db_path,
+        99999,
+        LeadSummary(
+            needs="x",
+            budget="y",
+            timeline="z",
+            next_step="Book a product demo",
+        ),
+    ) is False

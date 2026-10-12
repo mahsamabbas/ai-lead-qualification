@@ -50,6 +50,14 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+export function isLeadComplete(summary: LeadSummary | null) {
+  return Boolean(
+    summary?.needs?.trim() &&
+      summary?.budget?.trim() &&
+      summary?.timeline?.trim(),
+  );
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -59,6 +67,22 @@ function formatDate(value: string) {
         day: "numeric",
         year: "numeric",
       }).format(date);
+}
+
+function leadMatchesQuery(lead: LeadRecord, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [
+    lead.needs,
+    lead.budget,
+    lead.timeline,
+    lead.next_step ?? "",
+    formatDate(lead.created_at),
+    String(lead.id),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
 }
 
 export default function Home() {
@@ -71,7 +95,10 @@ export default function Home() {
   const [detailPending, setDetailPending] = useState(false);
   const [draft, setDraft] = useState("");
   const [serviceReady, setServiceReady] = useState<boolean | null>(null);
-  const conversationEnd = useRef<HTMLDivElement>(null);
+  const [editingUnlocked, setEditingUnlocked] = useState(false);
+  const [activeLeadId, setActiveLeadId] = useState<number | null>(null);
+  const [leadQuery, setLeadQuery] = useState("");
+  const conversationRef = useRef<HTMLDivElement>(null);
   const chatGenerationRef = useRef(0);
 
   const refreshLeads = useCallback(async () => {
@@ -92,12 +119,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
+    const container = conversationRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, [messages, pending]);
 
   async function submitMessage(rawMessage: string) {
     const message = rawMessage.trim();
     if (!message || pending) return;
+    if (isLeadComplete(summary) && !editingUnlocked) return;
 
     const history = messages.slice(-10);
     const previousSummary = summary;
@@ -108,14 +138,26 @@ export default function Home() {
     setPending(true);
 
     try {
-      const result = await sendChat(message, history, previousSummary);
+      const result = await sendChat(
+        message,
+        history,
+        previousSummary,
+        activeLeadId,
+      );
       if (generation !== chatGenerationRef.current) return;
       setMessages((current) => [
         ...current,
         { role: "assistant", content: result.assistant_message },
       ]);
       setSummary(result.summary);
-      await refreshLeads();
+      if (result.lead_id != null) {
+        setActiveLeadId(result.lead_id);
+      }
+      if (isLeadComplete(result.summary)) {
+        setEditingUnlocked(false);
+      }
+      // Don't block the typing indicator on the leads refresh.
+      void refreshLeads();
     } catch (requestError) {
       if (generation !== chatGenerationRef.current) return;
       setError(errorMessage(requestError));
@@ -139,6 +181,13 @@ export default function Home() {
     setError(null);
     setDraft("");
     setPending(false);
+    setEditingUnlocked(false);
+    setActiveLeadId(null);
+  }
+
+  function unlockEditing() {
+    setEditingUnlocked(true);
+    setError(null);
   }
 
   async function openLead(id: number) {
@@ -154,6 +203,11 @@ export default function Home() {
   }
 
   const visibleSummary = summary ?? EMPTY_SUMMARY;
+  const leadComplete = isLeadComplete(summary);
+  const chatLocked = leadComplete && !editingUnlocked;
+  const filteredLeads = leads.filter((lead) =>
+    leadMatchesQuery(lead, leadQuery),
+  );
 
   return (
     <div className="app-shell">
@@ -201,7 +255,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="conversation">
+          <div className="conversation" ref={conversationRef}>
             {messages.length === 0 && (
               <>
                 <MessageBubble role="assistant" content={WELCOME} />
@@ -212,7 +266,7 @@ export default function Home() {
                       <button
                         type="button"
                         key={starter.label}
-                        disabled={pending}
+                        disabled={pending || chatLocked}
                         onClick={() => void submitMessage(starter.message)}
                       >
                         {starter.label}
@@ -241,37 +295,69 @@ export default function Home() {
                 </div>
               </div>
             )}
-            <div ref={conversationEnd} />
           </div>
 
-          <form onSubmit={handleSubmit} className="composer">
-            <div>
-              <label htmlFor="message" className="sr-only">
-                Message
-              </label>
-              <textarea
-                id="message"
-                value={draft}
-                rows={2}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void submitMessage(draft);
-                  }
-                }}
-                placeholder="Describe your store, budget, and ideal launch date…"
-              />
-              <button
-                type="submit"
-                aria-label="Send message"
-                disabled={pending || !draft.trim()}
-              >
-                <span aria-hidden="true">↗</span>
-              </button>
+          {chatLocked ? (
+            <div className="complete-panel" role="status">
+              <div>
+                <p>Lead qualified</p>
+                <h3>
+                  {summary?.next_step?.trim()
+                    ? summary.next_step
+                    : "All required details are captured"}
+                </h3>
+                <span>
+                  Chat is paused so this summary stays stable. Edit if something
+                  needs a correction, or start a new lead.
+                </span>
+              </div>
+              <div className="complete-actions">
+                <button type="button" onClick={unlockEditing}>
+                  Edit answers
+                </button>
+                <button type="button" className="primary" onClick={startNewLead}>
+                  New lead
+                </button>
+              </div>
             </div>
-            <p>Your answers are used only to prepare this lead summary.</p>
-          </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="composer">
+              <div>
+                <label htmlFor="message" className="sr-only">
+                  Message
+                </label>
+                <textarea
+                  id="message"
+                  value={draft}
+                  rows={2}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void submitMessage(draft);
+                    }
+                  }}
+                  placeholder={
+                    editingUnlocked
+                      ? "Update needs, budget, or timeline…"
+                      : "Describe your store, budget, and ideal launch date…"
+                  }
+                />
+                <button
+                  type="submit"
+                  aria-label="Send message"
+                  disabled={pending || !draft.trim()}
+                >
+                  <span aria-hidden="true">↗</span>
+                </button>
+              </div>
+              <p>
+                {editingUnlocked
+                  ? "Editing is open. When the three fields are complete again, chat will pause."
+                  : "Your answers are used only to prepare this lead summary."}
+              </p>
+            </form>
+          )}
         </section>
 
         <aside className="sidebar">
@@ -296,14 +382,31 @@ export default function Home() {
               </div>
               {detailPending && <span>Loading…</span>}
             </div>
+            {leads.length > 0 && (
+              <label className="lead-search">
+                <span className="sr-only">Search past leads</span>
+                <input
+                  type="search"
+                  value={leadQuery}
+                  onChange={(event) => setLeadQuery(event.target.value)}
+                  placeholder="Search needs, budget, timeline…"
+                  autoComplete="off"
+                />
+              </label>
+            )}
             {leads.length === 0 ? (
               <div className="empty-leads">
                 <strong>No qualified leads yet</strong>
                 <span>Completed conversations will appear here.</span>
               </div>
+            ) : filteredLeads.length === 0 ? (
+              <div className="empty-leads">
+                <strong>No matching leads</strong>
+                <span>Try a different search term.</span>
+              </div>
             ) : (
               <div className="lead-list">
-                {leads.map((lead) => (
+                {filteredLeads.map((lead) => (
                   <button
                     type="button"
                     key={lead.id}

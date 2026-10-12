@@ -67,6 +67,53 @@ def test_chat_complete_saves(
     assert len(listed.json()["leads"]) == 1
 
 
+def test_chat_edit_updates_saved_lead(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    lead_id = insert_lead(
+        db_path,
+        LeadSummary(
+            needs="Online store",
+            budget="$900",
+            timeline="Next week",
+            next_step="Book a product demo",
+        ),
+    )
+
+    def fake_json(message, history, api_key):
+        return {
+            "assistant_message": "Budget updated to $500.",
+            "needs": "Online store",
+            "budget": "$500",
+            "timeline": "Next week",
+        }
+
+    with patch("app.qualify.generate_qualification_json", side_effect=fake_json):
+        res = client.post(
+            "/chat",
+            json={
+                "message": "change budget to 500$",
+                "history": [],
+                "previous_summary": {
+                    "needs": "Online store",
+                    "budget": "$900",
+                    "timeline": "Next week",
+                    "next_step": "Book a product demo",
+                },
+                "lead_id": lead_id,
+            },
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["saved"] is True
+    assert body["lead_id"] == lead_id
+    assert body["summary"]["budget"] == "$500"
+    detail = client.get(f"/leads/{lead_id}")
+    assert detail.json()["budget"] == "$500"
+    assert len(client.get("/leads").json()["leads"]) == 1
+
+
 def test_chat_gemini_failure_503(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
